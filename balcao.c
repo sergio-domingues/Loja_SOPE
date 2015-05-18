@@ -1,28 +1,37 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <fcntl.h> // For O_* constants
 #include <semaphore.h>
-#include <sys/mman.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <time.h> 
+#include <unistd.h>
 
 #define SHM_SIZE 1024
-#define PATH_BUF_SIZE 50
+#define BUFFER_SIZE 50
+
+
+void* thr_func(void*arg);
 
 typedef struct {
   
   int inicio_funcionamento;
-  int duracao_abertura;
+  int duracao_funcionamento;
   int id;
-  char nome_fifo;
+  char* fifo_nome;
   int num_cli_atendidos;
   int num_cli_atendimento;
   int tempo_medio_atendimento;
   int estado;  
 } Balcao;
+
+typedef struct {
+  
+  char* fifo_cliente;
+  int tempo_simula_atendimento; 
+  
+}info_atendimento;
 
 
 int main(int argc,char* argv[]){
@@ -45,7 +54,8 @@ int main(int argc,char* argv[]){
   //variaveis========================
   int create_shm = 0;
   int shmfd;
-  char *shm,*s;
+  char *shm;
+  int *s;
   
   char* SHM_NAME = argv[1];
   time_t tempo_actual_maquina = time(NULL);
@@ -56,29 +66,11 @@ int main(int argc,char* argv[]){
   }
   //=================================
   
-  //verifica se a memoria partilhada existe  
-  if((shmfd = shm_open(SHM_NAME,O_RDWR,0600)) < 0){
-    create_shm = 1; // criar memoria partilhada
-  }
+  //Cria memoria partilhada se nao existir
+  shmfd = create_shared_memory(SHM_NAME,SHM_SIZE);
   
-  //Cria memoria partilhada (caso:1º balcao)================================
-  if(create_shm){  
-    
-    //create the shared memory region IF IT NOT EXISTS
-    shmfd = shm_open(SHM_NAME,O_CREAT|O_RDWR,0600);
-    if(shmfd<0){ 
-      fprintf(stderr, "ERRO NA CONECCAO A MEM PARTILHADA\n");
-      exit(1); 
-    }
-    
-    //atribuicao tamanho da mem partilhada
-    if (ftruncate(shmfd,SHM_SIZE) < 0){
-      fprintf(stderr, "ERRO NA ATRIBUICAO DO TAMAMNHO DA MEM PARTILHADA\n");
-      exit(1);
-    }
-    printf("SHARED MEMORY CREATED SUCCESSFULLY\n"); // TODO : log
-  }  
-  //========================================================================
+  if(shmfd >= 0)
+    create_shm = 1;  
   
   //mapeamento para virtual memory
   shm = (char *) mmap(0,SHM_SIZE,PROT_READ|PROT_WRITE,MAP_SHARED,shmfd,0);
@@ -90,14 +82,15 @@ int main(int argc,char* argv[]){
   //inicializacao primitivas shm=====================
   if(create_shm){
     
-    s = shm;
-    *(int*)s = 0; //flag: 1->mem_partilhada a ser acedida 
+    s = (int*) shm; //inicio shm
+    
+    *s = 1; //flag: 1->mem_partilhada a ser acedida	
     s++;
     
-    *s = tempo_actual_da_maquina; //data de abertura da loja
+    *s = tempo_actual_maquina; //data de abertura da loja
     s++;
     
-    *s = 0; //num de balcoes registados     
+    *s = 0; //num de balcoes registados       
   }  
   //============================================================   
   
@@ -106,78 +99,188 @@ int main(int argc,char* argv[]){
   Balcao b;
   
   b.inicio_funcionamento = tempo_actual_maquina;
-  b.duracao_abertura = atoi(argv[2]);
+  b.duracao_funcionamento = -1;
   b.num_cli_atendidos=0;
   b.num_cli_atendimento=0;
   b.tempo_medio_atendimento=0;
   b.estado = 1;    
   
-  //TODO verificar se pode aceder a mem partilhada PROBLEMATICA DE ACESSO CONCORRENTE ENTRE PROCESSOS
-  s = shm;
-  (int*)s;
+  //TODO verificar se pode aceder a mem partilhada:-> PROBLEMATICA DE ACESSO CONCORRENTE ENTRE PROCESSOS
   
-  s = s+2; //s->nº balcoes
-  *s = *s +1; //nº balcoes++
+  s = (int*)shm; 
+  s++;
+  s++; //s->nº balcoes
+  (*s)+=1; //nº balcoes++
+  
   b.id = *s; //id balcao
   s++; //aponta agora para o inicio da tabela de balcoes
   
-  //criação do fifo TODO usar realpath para o caminho do fifo
-  
-  char buffer[50];
+  //criação do fifo TODO usar realpath para o caminho do fifo  
+  char buffer[BUFFER_SIZE];
   int n;
+  pid_t pid = getpid();
   
-  n = sprintf(buffer,"./tmp/fb_%d",getpid(void)); //getpid(void) retorna pid do proprio processo
+  n = sprintf(buffer,"./tmp/fb_%d",pid); //getpid(void) retorna pid do proprio processo
   
   if(n < 0){
-   fprintf(stderr,"ERRO NA CRIACAO DO NOME DO FIFO (SPRINTF)\n");
-   exit(1);
+    fprintf(stderr,"ERRO NA CRIACAO DO NOME DO FIFO (SPRINTF)\n");
+    exit(1);
   }
   
-  mkfifo(buffer,0660);
+  n = mkfifo(buffer,0660); 
   
+  if(n < 0){
+    fprintf(stderr,"ERRO NA CRIACAO DO FIFO\n");
+    exit(1);
+  }
   
-  b.nome_fifo = ;
+  b.fifo_nome = buffer;  
   
-  (Balcao*) s;
-  
+  Balcao* b_ptr = (Balcao*) s;
   int i;
-  for(i=0; i < b.id-1 ; i++; s++); //desloca apontador para a nova linha correspondente a este balcao
-
-  *s = b;  //regista balcao na shm
+  for(i=0; i < b.id-1 ; i++, b_ptr++); //desloca apontador para a nova linha correspondente a este balcao
   
-  (char*) s = shm;
-  *(int*)s = 0; //actualiza flag de acesso
+  *b_ptr = b;  //regista balcao na shm
   
+  s = (int*)shm;
+  *s = 0; //actualiza flag de acesso
+  //==========================================================  
+  
+  //ZONA TESTES===============================================
+  int k = 0;
+  for(s=(int*)shm; k < 20; k++, s++)
+    printf("value:%d\n",*s);
+  
+  s = (int*)shm;
+  s++;
+  s++;
+  s++;
+  
+  printf("->:%d\n",*s);
+  
+  Balcao x;
+  b_ptr = (Balcao*) s;
+  x=*b_ptr;
+  
+  printf("->:%s\n",x.fifo_nome);
+  //==========================================================  
   
   //===========THREAD RELATED PART TODO
   
-  //criacao mutex  
+  //criacao mutex  TODO  
+  //CADA THREAD VAI TENTAR ADQUIRIR MUTEX
+  
+  int tempo_limite = (int)tempo_actual_maquina + atoi(argv[2]);
+  int clientes_atendidos = 0; // =1 todos os clientes atribuidos foram atendidos
+  int fd;  
   
   
-  open(FIFO1,O_RDONLY); //fica em espera bloqueante ate que um processo abra o FIFO para escrita, PROBLEMA: pode nao chegar a escrever para la
+  //TODO usar sinais para interromper espera bloquenate no FIFO caso balcao ja tenha atingido limite de funcionamento e todos 
+  //os seus clientes tenham sido atendidos
   
-  //TODO lanca thread qd receber cliente no fifo e volta a bloquear (fazer isto num ciclo while)
+  while((tempo_limite - (int)time(NULL)) > 0 && !clientes_atendidos){    
+    
+    fd = open(b.nome_fifo, O_RDONLY);//espera bloqueante ate que um processo abra o FIFO para escrita. PROBLEMA:pode nao chegar a escrever para la
+    
+    while(readFifo(fd,buffer)); //espera bloqueante ate conseguir ler do FIFO
+    
+    close(fd);
+    
+    info_atendimento info; //struct a ser passada com argumento à thr_func
+    
+    info.fifo_cliente = buffer;
+    
+    if((b.tempo_simula_atendimento+1) >10) //maximo de 10 segundos
+      info.tempo_simula_atendimento = 10;
+    
+    info.tempo_simula_atendimento = b.num_cli_atendimento+1;
+    
+    pthread_t tid;
+    
+    //CRIA THREAD
+    pthread_create(&tid, NULL, thr_func, &buffer);    
+  }
+  
   
   //===============================
   
   //se for o ultimo balcao activo e tiver terminado o seu tempo_abertura
+  //COMO VERIFICAR: percorrer cad abalcao da mem partilhada e verificar se ainda esta em funcionamento (flag -1)
   
   //actualiza last info do ultimo balcao TODO
+  
+  
   
   //gerar estatisticas de funcionamento da loja
   
   
   //==============
-  //close and remove shared memory region
-  
-  if (munmap(shm,SHM_SIZE) < 0){ 
-    fprintf(stderr,"ERRO NA LIBERTACAO DA MEMORIA\n");
-    exit(1);
-  }
-  if (shm_unlink(SHM_NAME) < 0) {  
-    fprintf(stderr,"ERRO NA REMOCAO DA MEMORIA PARTILHADA\n");
-    exit(1);
-  }  
+  //close and remove shared memory region  
+  destroy_shared_memory(shm,SHM_SIZE); 
   
   return 0;  
 }
+
+
+void* thr_func(void*arg){
+  
+  //TENTA ADQUIRIR MUTEX TODO
+  //se adquirir tranca mutex
+  
+  sleep((info_atendimento*)arg->tempo_simula_atendimento);
+  
+  int fd_fifo = open((info_atendimento*)arg->fifo_cliente, O_WRONLY);
+  
+  write(fd_fifo,"FIM_ATENDIMENTO",sizeof("FIM ATENDIMENTO"));
+  
+  //destranca mutex TODO    
+}
+
+//=====================================================
+//FUNCOES AUXILIARES====================================
+
+int readFifo(int fd, char *str){
+  int n;
+  do{
+    n = read(fd,str,1);
+  }
+  while (n>0 && *str++ != '\0');
+  return (n>0);
+}
+
+//CRIA SHM SE NAO EXISTIR
+int create_shared_memory(char* shm_name, int shm_size){
+  int shmfd;
+  
+  //try to create the shared memory region
+  shmfd = shm_open(SHM_NAME,O_CREAT|O_EXCL|O_RDWR,0660);
+  
+  if(shmfd == EEXIST) //SE JA EXISTIR RETORNA-1
+    return -1;
+  
+  if(shmfd < 0 ){
+    fprintf(stderr, "ERRO NA CONECCAO A MEM PARTILHADA\n");
+    exit(EXIT_FAILURE);
+  }
+  
+  //specify the size of the shared memory region
+  if (ftruncate(shmfd,shm_size) < 0){
+    fprintf(stderr, "ERRO NA ATRIBUICAO DO TAMAMNHO DA MEM PARTILHADA\n");
+    exit(EXIT_FAILURE);
+  } 
+  
+  return shmfd;
+} 
+
+
+void destroy_shared_memory(Shared_memory *shm, int shm_size)
+{
+  if (munmap(shm,shm_size) < 0){
+    fprintf(stderr,"ERRO NA LIBERTACAO DA MEMORIA\n");
+    exit(EXIT_FAILURE);
+  }
+  if (shm_unlink(SHM_NAME) < 0){
+    fprintf(stderr,"ERRO NA REMOCAO DA MEMORIA PARTILHADA\n");
+    exit(EXIT_FAILURE);
+  }
+} 
