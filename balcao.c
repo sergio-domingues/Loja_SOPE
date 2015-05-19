@@ -23,7 +23,8 @@ typedef struct {
   int num_cli_atendidos;
   int num_cli_atendimento;
   int tempo_medio_atendimento;
-  int estado;  
+  int estado;
+  pthread_mutex_t mutex; //Não tenho a certeza
 } Balcao;
 
 typedef struct {
@@ -52,7 +53,7 @@ int main(int argc,char* argv[]){
   //sprintf()...
   
   //variaveis========================
-  int create_shm = 0;
+  int create_shm = 0; //Flag memoria partilhada já criada
   int shmfd;
   char *shm;
   int *s;
@@ -103,7 +104,8 @@ int main(int argc,char* argv[]){
   b.num_cli_atendidos=0;
   b.num_cli_atendimento=0;
   b.tempo_medio_atendimento=0;
-  b.estado = 1;    
+  b.estado = 1;
+  b.mutex = PTHREAD_MUTEX_INITIALIZER; //Não tenho a certeza
   
   //TODO verificar se pode aceder a mem partilhada:-> PROBLEMATICA DE ACESSO CONCORRENTE ENTRE PROCESSOS
   
@@ -207,9 +209,29 @@ int main(int argc,char* argv[]){
   //se for o ultimo balcao activo e tiver terminado o seu tempo_abertura
   //COMO VERIFICAR: percorrer cad abalcao da mem partilhada e verificar se ainda esta em funcionamento (flag -1)
   
+  int nrBalcoesActivos=1; //numero de balcoes activos da loja (predefinido como sendo só um)
+  
+  s = (int*)shm; 
+  s++;
+  s++;
+  int nr_balcoes=s; //s->nº balcoes
+  s++;
+  
+	Balcao* balcao_tabela;
+	int i;
+	
+	for(i=0;i<nr_balcoes;i++){
+		balcao_tabela=(Balcao *)s;
+		if((*balcao_tabela).estado==1){
+			nrBalcoesActivos++;
+			break;
+		}
+	}
+  
   //actualiza last info do ultimo balcao TODO
   
-  
+  //coloca na posicao inicial da tabela
+ 
   
   //gerar estatisticas de funcionamento da loja
   
