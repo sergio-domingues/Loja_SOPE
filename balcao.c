@@ -1,41 +1,25 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <fcntl.h> // For O_* constants
-#include <semaphore.h>
-#include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <time.h> 
-#include <unistd.h>
+#include "loja.h"
 
-#define SHM_SIZE 1024
-#define BUFFER_SIZE 50
-
+#define end_msg "terminou tempo"
 
 void* thr_func(void*arg);
+void* loop_thr(void*arg);
+int create_shared_memory(char* shm_name, int shm_size);
+void destroy_shared_memory(char *shm, int shm_size);
+//=================
 
-typedef struct {
-  
-  int inicio_funcionamento;
-  int duracao_funcionamento;
-  int id;
-  char* fifo_nome;
-  int num_cli_atendidos;
-  int num_cli_atendimento;
-  int tempo_medio_atendimento;
-  int estado;  
-} Balcao;
+pthread_mutex_t balcao_lock;	//mutex thread related
+char* shm; 			              //apontador para inicio shm (mem virtual)
+int fd_OWR_b; 		           
 
-typedef struct {
-  
-  char* fifo_cliente;
-  int tempo_simula_atendimento; 
-  
-}info_atendimento;
-
+void  ALARMhandler(int sig) {
+  signal(SIGALRM, SIG_IGN);          		/* ignore this signal       */
+  close(fd_OWR_b);                     //terminou tempo, fecha fifo (escrita) neste processo
+  signal(SIGALRM, ALARMhandler);     		/* reinstall the handler    */
+}
 
 int main(int argc,char* argv[]){
-  
+
   if(argc!=3){   
     fprintf(stderr,"Wrong no of arguments.\nUsage: balcao <nome_mempartilhada> <tempo_abertura> \n");
     exit(1);
@@ -51,13 +35,12 @@ int main(int argc,char* argv[]){
   //char buf[PATH_BUF_SIZE];
   //sprintf()...
   
-  //variaveis========================
-  int create_shm = 0;
-  int shmfd;
-  char *shm;
-  int *s;
+  signal(SIGALRM, ALARMhandler); 
   
-  char* SHM_NAME = argv[1];
+  //variaveis========================
+  int shmfd, create_shm = 0;
+  Loja* l_ptr;
+  
   time_t tempo_actual_maquina = time(NULL);
   
   if(tempo_actual_maquina == -1){
@@ -67,7 +50,7 @@ int main(int argc,char* argv[]){
   //=================================
   
   //Cria memoria partilhada se nao existir
-  shmfd = create_shared_memory(SHM_NAME,SHM_SIZE);
+  shmfd = create_shared_memory(argv[1],SHM_SIZE);
   
   if(shmfd >= 0)
     create_shm = 1;  
@@ -79,181 +62,274 @@ int main(int argc,char* argv[]){
     exit(1);
   }  
   
+  printf("mapeou\n");
   //inicializacao primitivas shm=====================
-  if(create_shm){
+  if(create_shm){    
+    Loja loja;
     
-    s = (int*) shm; //inicio shm
+    //log
+    log_loja(argv[1],"Balcao",1,"inicia_mempart", "-");
     
-    *s = 1; //flag: 1->mem_partilhada a ser acedida	
-    s++;
+    loja.tempo_abertura_loja = (int) tempo_actual_maquina;
+    loja.balcoes_registados = 0;
     
-    *s = tempo_actual_maquina; //data de abertura da loja
-    s++;
+    if (pthread_mutex_init(&(loja.access_lock), NULL) != 0){ 	 //INIT MUTEX SHM
+      printf("\n access_mutex init failed\n");
+      exit(EXIT_FAILURE);
+    }
     
-    *s = 0; //num de balcoes registados       
+    l_ptr = (Loja*) shm; //inicio shm
+    
+    *l_ptr = loja;
+    create_shm = 0;
   }  
   //============================================================   
   
-  //inicializa atributos Balcao
+  printf("criou e abriu loja\n");
+
+  l_ptr = (Loja*) shm; 
   
+  if(l_ptr->balcoes_registados == BALCOES_MAX){		//VERIFICA SE NAO ATINGIU LIMITE DE BALCOES
+    fprintf(stderr,"limite de balcoes atingidos\n");
+    exit(EXIT_FAILURE);
+  }  
+  
+  //inicializa atributos Balcao=================================
   Balcao b;
   
   b.inicio_funcionamento = tempo_actual_maquina;
   b.duracao_funcionamento = -1;
-  b.num_cli_atendidos=0;
-  b.num_cli_atendimento=0;
-  b.tempo_medio_atendimento=0;
+  b.num_cli_atendidos = 0;
+  b.num_cli_atendimento = 0;
+  b.tempo_medio_atendimento = 0;
   b.estado = 1;    
   
-  //TODO verificar se pode aceder a mem partilhada:-> PROBLEMATICA DE ACESSO CONCORRENTE ENTRE PROCESSOS
+  pthread_mutex_lock(&(l_ptr->access_lock)); //tenta fazer lock | espera bloqueante caso nao consiga
   
-  s = (int*)shm; 
-  s++;
-  s++; //s->nº balcoes
-  (*s)+=1; //nº balcoes++
-  
-  b.id = *s; //id balcao
-  s++; //aponta agora para o inicio da tabela de balcoes
-  
+  l_ptr->balcoes_registados++;        //incrementa num de balcoes registados  
+  b.id = l_ptr->balcoes_registados; 	//id balcao
+
   //criação do fifo TODO usar realpath para o caminho do fifo  
-  char buffer[BUFFER_SIZE];
   int n;
   pid_t pid = getpid();
+  char buffer[BUFFER_SIZE];
   
-  n = sprintf(buffer,"./tmp/fb_%d",pid); //getpid(void) retorna pid do proprio processo
+  sprintf(buffer,"fb_%d",pid);
+  strcpy (b.nome , buffer);
+
+  n = sprintf(buffer,"./tmp/%s",b.nome); //getpid(void) retorna pid do proprio processo
   
   if(n < 0){
     fprintf(stderr,"ERRO NA CRIACAO DO NOME DO FIFO (SPRINTF)\n");
     exit(1);
   }
-  
-  n = mkfifo(buffer,0660); 
-  
+    
+  n = mkfifo(buffer,0660);   //criacao do fifo do balcao
+
   if(n < 0){
     fprintf(stderr,"ERRO NA CRIACAO DO FIFO\n");
     exit(1);
   }
   
-  b.fifo_nome = buffer;  
+  strcpy(b.fifo_nome, buffer);    
   
-  Balcao* b_ptr = (Balcao*) s;
-  int i;
-  for(i=0; i < b.id-1 ; i++, b_ptr++); //desloca apontador para a nova linha correspondente a este balcao
+  l_ptr->balcoes[b.id-1] = b; //regista balcao no array
   
-  *b_ptr = b;  //regista balcao na shm
-  
-  s = (int*)shm;
-  *s = 0; //actualiza flag de acesso
-  //==========================================================  
-  
-  //ZONA TESTES===============================================
-  int k = 0;
-  for(s=(int*)shm; k < 20; k++, s++)
-    printf("value:%d\n",*s);
-  
-  s = (int*)shm;
-  s++;
-  s++;
-  s++;
-  
-  printf("->:%d\n",*s);
-  
-  Balcao x;
-  b_ptr = (Balcao*) s;
-  x=*b_ptr;
-  
-  printf("->:%s\n",x.fifo_nome);
-  //==========================================================  
-  
-  //===========THREAD RELATED PART TODO
-  
-  //criacao mutex  TODO  
-  //CADA THREAD VAI TENTAR ADQUIRIR MUTEX
-  
-  int tempo_limite = (int)tempo_actual_maquina + atoi(argv[2]);
-  int clientes_atendidos = 0; // =1 todos os clientes atribuidos foram atendidos
-  int fd;  
-  
-  
-  //TODO usar sinais para interromper espera bloquenate no FIFO caso balcao ja tenha atingido limite de funcionamento e todos 
-  //os seus clientes tenham sido atendidos
-  
-  while((tempo_limite - (int)time(NULL)) > 0 && !clientes_atendidos){    
+  //log  
+  log_loja(argv[1],"Balcao",b.id,"cria_linh_mempart",b.nome);
     
-    fd = open(b.nome_fifo, O_RDONLY);//espera bloqueante ate que um processo abra o FIFO para escrita. PROBLEMA:pode nao chegar a escrever para la
-    
-    while(readFifo(fd,buffer)); //espera bloqueante ate conseguir ler do FIFO
-    
-    close(fd);
-    
-    info_atendimento info; //struct a ser passada com argumento à thr_func
-    
-    info.fifo_cliente = buffer;
-    
-    if((b.tempo_simula_atendimento+1) >10) //maximo de 10 segundos
-      info.tempo_simula_atendimento = 10;
-    
-    info.tempo_simula_atendimento = b.num_cli_atendimento+1;
-    
-    pthread_t tid;
-    
-    //CRIA THREAD
-    pthread_create(&tid, NULL, thr_func, &buffer);    
+  l_ptr = (Loja*) shm; 
+  pthread_mutex_unlock(&(l_ptr->access_lock)); //faz unlock ao mutex de acesso à shm
+  
+  //==============  
+  if (pthread_mutex_init(&balcao_lock, NULL) != 0){ 	//inicia mutex deste processo
+    printf("\n mutex init failed\n");
+    return 1;
+  }  
+  
+  int fd = open(b.fifo_nome, O_RDONLY|O_NONBLOCK);    	//abre fifo balcao leitura
+  if(fd < 0){
+    fprintf(stderr, "ERRO NA ABERTURA DO FIFO LEITURA\n");
+    exit(EXIT_FAILURE);
   }
   
+  int old_flags = fcntl(fd, F_GETFL,0);
+  fcntl (fd, F_SETFL, old_flags & (~O_NONBLOCK));   //clear O_NONBLOCK flag
+
+  int fd_2 = open(b.fifo_nome, O_WRONLY);     //abre fifo balcao escrita
+  if(fd_2 < 0){
+    fprintf(stderr, "ERRO NA ABERTURA DO FIFO escrita\n");
+    exit(EXIT_FAILURE);
+  }
+
+  fd_OWR_b = fd_2;       //descritor writing
+
+  alarm(atoi(argv[2]));   //agenda alarme duracao funcionamento balcao
   
-  //===============================
-  
-  //se for o ultimo balcao activo e tiver terminado o seu tempo_abertura
-  //COMO VERIFICAR: percorrer cad abalcao da mem partilhada e verificar se ainda esta em funcionamento (flag -1)
-  
-  //actualiza last info do ultimo balcao TODO
-  
-  
-  
-  //gerar estatisticas de funcionamento da loja
-  
-  
-  //==============
-  //close and remove shared memory region  
-  destroy_shared_memory(shm,SHM_SIZE); 
-  
+  //======================
+  print_loja(l_ptr);      //DEBUG PRINTF
+  //======================
+
+  pid = fork();
+
+  if(pid < 0){
+    fprintf(stderr,"ERRO FORK BALCAO.C\n");
+    exit(1);
+  }
+
+  if(pid==0){  //filho faz o trabalho -> assim pode criar balcoes no mesmo terminal
+
+    //===========THREADING RELATED PART============================
+    while(1){    
+
+      int v = readline(fd,buffer); //espera bloqueante
+      
+      if(v==0)    //nao ha mais clientes para atender //todos os que tinham aberto para escrita, fecharam
+        break;
+
+      pthread_t tid;    
+      Info_atendimento info; 
+      Loja* l_ptr = (Loja*) shm;    
+      
+      strcpy(info.fifo_cliente,buffer);
+      info.id_balcao = b.id ;
+      info.shm_name = argv[1];
+      
+      pthread_mutex_lock(&(l_ptr->access_lock));              //lock
+
+      if((l_ptr->balcoes[b.id-1].num_cli_atendimento+1) > 10) //maximo de 10 segundos
+        info.tempo_simula_atendimento = 10;
+      else
+        info.tempo_simula_atendimento = l_ptr->balcoes[b.id-1].num_cli_atendimento+1;
+      
+      pthread_mutex_unlock(&(l_ptr->access_lock));            //unlock
+
+      //CRIA THREAD
+      int err = pthread_create(&tid, NULL, thr_func, &info);    
+      
+      if(err != 0){
+        fprintf(stderr, "ERRO NA CRIACAO DA THREAD DE ATENDIMENTO\n");
+        exit(EXIT_FAILURE);
+      }
+    }
+    //===============
+    
+    //log
+    log_loja(argv[1],"Balcao",b.id,"fecha_balcao",argv[1]);  
+
+    l_ptr->balcoes[b.id].duracao_funcionamento = (int)time(NULL) - b.inicio_funcionamento; //actualiza duracao do balcao
+    
+    close(fd);
+    close(fd_2);
+    unlink(b.fifo_nome);      //destroi fifo  
+    
+    //======================
+    print_loja(l_ptr);    //DEBUG PRINTF
+    //======================
+
+    int i,fecha = 0;
+    pthread_mutex_lock(&(l_ptr->access_lock));
+
+    for(i=0; i < l_ptr->balcoes_registados;i++) {
+
+      if(l_ptr->balcoes[i].duracao_funcionamento == -1){
+        fecha = 1;
+        break;
+      }
+    }
+
+    pthread_mutex_unlock(&(l_ptr->access_lock));
+
+
+    if(fecha){                    //gerar estatisticas
+      int clis=0,t_medio;
+      struct tm  ts;
+      time_t x;
+
+      for(i=0; i < l_ptr->balcoes_registados;i++){
+        ts = *localtime((time_t *)&l_ptr->balcoes[i].inicio_funcionamento);
+
+        strftime(buffer, BUFFER_SIZE, "%Y-%m-%d %H:%M:%S", &ts);
+        printf("Balcao %d\n",l_ptr->balcoes[i].id);
+        printf("Tempo abertura:%s\n",buffer);
+        printf("Cli atendidos:%d\n",l_ptr->balcoes[i].num_cli_atendidos);
+        printf("Tempo medio atendimento:%d\n",l_ptr->balcoes[i].tempo_medio_atendimento);
+        clis+=l_ptr->balcoes[i].num_cli_atendidos;
+        t_medio+=l_ptr->balcoes[i].tempo_medio_atendimento;
+      }
+
+      ts = *localtime(&((time_t)l_ptr->tempo_abertura_loja));
+      strftime(buffer, BUFFER_SIZE, "%Y-%m-%d %H:%M:%S",&ls);
+      printf("Abertura loja:%s\n",buffer);
+      printf("Total cli atendidos:%d\n",clis);
+      printf("Tempo medio antedimento:%d\n",t_medio/clis);
+    } 
+
+    //==============
+    //log
+    log_loja(argv[1],"Balcao",b.id,"fecha_loja",NULL);    
+    
+    pthread_mutex_destroy(&balcao_lock);     	    //destroy mutex
+    destroy_shared_memory(argv[1],SHM_SIZE);    //close and remove shared memory region 
+  }
+
   return 0;  
 }
 
 
 void* thr_func(void*arg){
-  
-  //TENTA ADQUIRIR MUTEX TODO
-  //se adquirir tranca mutex
-  
-  sleep((info_atendimento*)arg->tempo_simula_atendimento);
-  
-  int fd_fifo = open((info_atendimento*)arg->fifo_cliente, O_WRONLY);
-  
-  write(fd_fifo,"FIM_ATENDIMENTO",sizeof("FIM ATENDIMENTO"));
-  
-  //destranca mutex TODO    
-}
 
-//=====================================================
-//FUNCOES AUXILIARES====================================
-
-int readFifo(int fd, char *str){
+  pthread_mutex_lock(&balcao_lock); //espera bloqueante ate conseguir fazer lock
+  
+  Loja* l_ptr = (Loja*) shm;
   int n;
-  do{
-    n = read(fd,str,1);
-  }
-  while (n>0 && *str++ != '\0');
-  return (n>0);
+  
+  //log
+  log_loja(((Info_atendimento*)arg)->shm_name,"Balcao",((Info_atendimento*)arg)->id_balcao,"inicia_atend_cli",((Info_atendimento*)arg)->fifo_cliente);  
+    
+  pthread_mutex_lock(&(l_ptr->access_lock)); //lock shm 
+  
+  n = ((Info_atendimento*)arg)->id_balcao - 1; // indice array balcoes
+  l_ptr->balcoes[n].num_cli_atendimento++; 	//incremento nº clientes em atendimento
+  
+  pthread_mutex_unlock(&(l_ptr->access_lock));
+  
+  sleep((*(Info_atendimento*)arg).tempo_simula_atendimento); 		  //realiza atendimento
+  
+  n = open((*(Info_atendimento*)arg).fifo_cliente, O_WRONLY ); 		//abre FIFO cliente para escrita  
+  write(n,msg, sizeof(msg));	  					//escreve no fifo do cliente : fim_atendimento  
+  close(n);
+  
+  //actualiza info balcao
+  pthread_mutex_lock(&(l_ptr->access_lock)); //lock shm
+  
+  l_ptr->balcoes[n].num_cli_atendidos++;  
+  l_ptr->balcoes[n].num_cli_atendimento--;
+  
+  if(l_ptr->balcoes[n].tempo_medio_atendimento == 0)
+    l_ptr->balcoes[n].tempo_medio_atendimento = (*(Info_atendimento*)arg).tempo_simula_atendimento;
+  else  
+    l_ptr->balcoes[n].tempo_medio_atendimento = (l_ptr->balcoes[n].tempo_medio_atendimento + (*(Info_atendimento*)arg).tempo_simula_atendimento) / 2 ; 
+  
+  
+  //log
+  log_loja(((Info_atendimento*)arg)->shm_name,"Balcao",((Info_atendimento*)arg)->id_balcao,"fim_atendimento",((Info_atendimento*)arg)->fifo_cliente);
+  
+  pthread_mutex_unlock(&(l_ptr->access_lock));    //unlock mutex de acesso à shm  
+  pthread_mutex_unlock(&balcao_lock);		 //unlock mutex balcao
+  
+  return NULL;
 }
+
+
+//FUNCOES AUXILIARES====================================
 
 //CRIA SHM SE NAO EXISTIR
 int create_shared_memory(char* shm_name, int shm_size){
   int shmfd;
   
   //try to create the shared memory region
-  shmfd = shm_open(SHM_NAME,O_CREAT|O_EXCL|O_RDWR,0660);
+  shmfd = shm_open(shm_name,O_CREAT|O_EXCL|O_RDWR,0660);
   
   if(shmfd == EEXIST) //SE JA EXISTIR RETORNA-1
     return -1;
@@ -272,15 +348,13 @@ int create_shared_memory(char* shm_name, int shm_size){
   return shmfd;
 } 
 
-
-void destroy_shared_memory(Shared_memory *shm, int shm_size)
-{
+void destroy_shared_memory(char *shm_name, int shm_size){
   if (munmap(shm,shm_size) < 0){
     fprintf(stderr,"ERRO NA LIBERTACAO DA MEMORIA\n");
     exit(EXIT_FAILURE);
   }
-  if (shm_unlink(SHM_NAME) < 0){
+  if (shm_unlink(shm_name) < 0){
     fprintf(stderr,"ERRO NA REMOCAO DA MEMORIA PARTILHADA\n");
     exit(EXIT_FAILURE);
   }
-} 
+}
