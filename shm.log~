@@ -1,0 +1,22 @@
+quando               | quem        | balcao      | o_que                |   canal_criado/usado 
+2015-05-22 02:34:02  | Balcao      | 1           | inicia_mempart       |                    - 
+2015-05-22 02:34:02  | Balcao      | 1           | cria_linh_mempart    |              fb_7137 
+2015-05-22 02:34:07  | Balcao      | 2           | cria_linh_mempart    |              fb_7139 
+2015-05-22 02:34:10  | Balcao      | 1           | pede_atendimento     |          tmp/fc_7141 
+2015-05-22 02:34:10  | Balcao      | 2           | pede_atendimento     |          tmp/fc_7143 
+2015-05-22 02:34:10  | Balcao      | 1           | pede_atendimento     |          tmp/fc_7150 
+2015-05-22 02:34:10  | Balcao      | 2           | pede_atendimento     |          tmp/fc_7145 
+2015-05-22 02:34:10  | Balcao      | 1           | pede_atendimento     |          tmp/fc_7147 
+2015-05-22 02:34:10  | Balcao      | 1           | pede_atendimento     |          tmp/fc_7144 
+2015-05-22 02:34:10  | Balcao      | 1           | inicia_atend_cli     |          tmp/fc_7144 
+2015-05-22 02:34:10  | Balcao      | 2           | pede_atendimento     |          tmp/fc_7148 
+2015-05-22 02:34:10  | Balcao      | 2           | pede_atendimento     |          tmp/fc_7146 
+2015-05-22 02:34:10  | Balcao      | 2           | inicia_atend_cli     |          tmp/fc_7145 
+2015-05-22 02:34:10  | Balcao      | 1           | pede_atendimento     |          tmp/fc_7152 
+2015-05-22 02:34:14  | Balcao      | 1           | fecha_balcao         |                  shm 
+2015-05-22 02:34:15  | Balcao      | 2           | fim_atendimento      |          tmp/fc_7146 
+2015-05-22 02:34:15  | Balcao      | 2           | inicia_atend_cli     |          tmp/fc_7146 
+2015-05-22 02:34:20  | Balcao      | 2           | fim_atendimento      |          tmp/fc_7146 
+2015-05-22 02:34:20  | Balcao      | 2           | inicia_atend_cli     |          tmp/fc_7146 
+2015-05-22 02:34:21  | Balcao      | 2           | fecha_balcao         |                  shm 
+2015-05-22 02:34:21  | Balcao      | 2           | fecha_loja           |               (null) 
