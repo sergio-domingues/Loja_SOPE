@@ -36,7 +36,7 @@ int main(int argc,char* argv[]){
 		fprintf(stderr, "ERRO NA OBTENCAO DO TEMPO DA MAQUINA\n");
 		exit(1);
 	}
-  
+
 	shmfd = shm_open(argv[1],O_RDWR,0777);     //verifica se shmem ja exise
 
 	if(shmfd < 0){
@@ -74,6 +74,7 @@ int main(int argc,char* argv[]){
 	    
 	    fprintf(stderr,"criou e abriu loja\n");
 	}  
+
   //============================================================   
   l_ptr = (Loja*) shm;   //pointer para a loja (shm)
 
@@ -133,7 +134,7 @@ int main(int argc,char* argv[]){
   
   int old_flags = fcntl(fd, F_GETFL,0);
   fcntl (fd, F_SETFL, old_flags & (~O_NONBLOCK));   //clear O_NONBLOCK flag
-  
+
   int fd_2 = open(b.fifo_nome, O_WRONLY);     		//abre fifo balcao escrita
   if(fd_2 < 0){
   	fprintf(stderr, "ERRO NA ABERTURA DO FIFO escrita\n");
