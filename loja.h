@@ -20,20 +20,20 @@
 
 typedef struct {  
   time_t inicio_funcionamento;
+  pthread_mutex_t access_balcao;
   int duracao_funcionamento;
   int id;
   char nome[BUFFER_SIZE]; 
   char fifo_nome[BUFFER_SIZE];
   int num_cli_atendidos;
   int num_cli_atendimento;
-  int tempo_medio_atendimento;
+  float tempo_medio_atendimento;
   int estado; 
 } Balcao;
 
 typedef struct {  
   char fifo_cliente[BUFFER_SIZE];
   char* shm_name;
-  int tempo_simula_atendimento; 
   int id_balcao;  
 }Info_atendimento;
 
@@ -45,8 +45,7 @@ typedef struct {
   Balcao balcoes[BALCOES_MAX];
 }Loja;
 
-int readline(int fd, char *str)
-{
+int readline(int fd, char *str){
   int n;
   
   do
@@ -58,11 +57,10 @@ int readline(int fd, char *str)
 }
 
 void formated_time(char * buf){
-    
     time_t     now;
     struct tm  ts;
-    // Get current time
-    time(&now);
+   
+    time(&now);  // Get current time
 
     // Format time, "yyyy-mm-dd hh:mm:ss"
     ts = *localtime(&now);
@@ -91,7 +89,7 @@ void log_loja(char* shm_name, const char* quem, int balcao_id, const char* descr
 }
 
 void print_loja(Loja* loja){
-  fprintf(stderr,"//===========================//\n");
+  fprintf(stderr,"\n//===========================//\n");
   fprintf(stderr,"abertura_loja:%d\nbalcoes:%d\n",(int)loja->tempo_abertura_loja,loja->balcoes_registados);
   
   int i;
@@ -103,18 +101,19 @@ void print_loja(Loja* loja){
 
 void gera_stats(char* shm){
 
-  int i,clis=0,t_medio;
+  int i,clis=0;
+  float t_medio=0;
   Loja* l_ptr = (Loja*) shm;
   char buffer[BUFFER_SIZE];
 
-  printf("//==========STATS==========//\n");
+  printf("\n//==========STATS==========//\n");
   for(i=0; i < l_ptr->balcoes_registados;i++){
 
     strftime(buffer, BUFFER_SIZE, "%Y-%m-%d %H:%M:%S", localtime(&l_ptr->balcoes[i].inicio_funcionamento));
     fprintf(stderr,"Balcao %d\n",l_ptr->balcoes[i].id);
     fprintf(stderr,"Tempo abertura:%s\n",buffer);
     fprintf(stderr,"Cli atendidos:%d\n",l_ptr->balcoes[i].num_cli_atendidos);
-    fprintf(stderr,"Tempo medio atendimento:%d\n",l_ptr->balcoes[i].tempo_medio_atendimento);
+    fprintf(stderr,"Tempo medio atendimento:%5.2f\n",l_ptr->balcoes[i].tempo_medio_atendimento);
     clis += l_ptr->balcoes[i].num_cli_atendidos;
     t_medio += l_ptr->balcoes[i].tempo_medio_atendimento;
   }
@@ -122,6 +121,9 @@ void gera_stats(char* shm){
   strftime(buffer, BUFFER_SIZE, "%Y-%m-%d %H:%M:%S",localtime(&l_ptr->tempo_abertura_loja));
   fprintf(stderr,"Abertura loja:%s\n",buffer);
   fprintf(stderr,"Total cli atendidos:%d\n",clis);
-  fprintf(stderr,"Tempo medio antedimento:%d\n", t_medio/clis);
+  if(clis==0)
+    fprintf(stderr,"Tempo medio antedimento:%f\n", t_medio);
+  else
+    fprintf(stderr,"Tempo medio antedimento:%4.2f\n", (float) t_medio/clis);
   printf("//===========================//\n");
 }
