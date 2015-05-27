@@ -51,9 +51,7 @@ int main(int argc, char*argv[]){
 
       gera_fifo_cli(buffer);                                //cria FIFO cliente
       
-      pthread_mutex_lock(&(l_ptr->access_lock));            //espera bloqueante acesso à shm  
       n = l_ptr->balcoes_registados;
-      pthread_mutex_unlock(&(l_ptr->access_lock));
 
       //ESCOLHA DO BALCAO=========================
       int i,existe_balcao=0;
@@ -67,8 +65,7 @@ int main(int argc, char*argv[]){
         }
       }       
 
-      if(!existe_balcao){                                    //nao conseguiu alocar cliente
-        //pthread_mutex_unlock(&(l_ptr->access_lock));  
+      if(!existe_balcao){                                    //nao conseguiu alocar cliente 
         unlink(buffer); 
         fprintf(stderr,"n conseguiu alocar\n");
         continue;
@@ -85,8 +82,6 @@ int main(int argc, char*argv[]){
       write(fd,buffer,strlen(buffer) + 1);                    //escreve nome fifo_cliente no fifo_balcao
 
       log_loja(argv[1],"Client",l_ptr->balcoes[min_id].id,"pede_atendimento",buffer);
-
-      //pthread_mutex_unlock(&(l_ptr->access_lock));   //liberta shm
 
       int fd_cli = open(buffer,O_RDONLY);            //espera bloqueante
       readline(fd_cli,buf_aux);                      //espera bloqueante  ate receber mensagem "fim_atendimento"

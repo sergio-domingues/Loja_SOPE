@@ -39,9 +39,10 @@ typedef struct {
 
 typedef struct {  
   pthread_mutex_t access_lock;
-  pthread_mutex_t log_access;
+  pthread_mutex_t access_log;
   time_t tempo_abertura_loja;
   int balcoes_registados; 
+  int tempo_total;
   Balcao balcoes[BALCOES_MAX];
 }Loja;
 
@@ -75,7 +76,7 @@ void log_loja(char* shm_name, const char* quem, int balcao_id, const char* descr
   sprintf(buffer,"%s.log",shm_name);
   if((log_stream = fopen(buffer,"r")) == NULL){
     log_stream =fopen(buffer,"w");   //creates log file
-    fprintf(log_stream,"%-20s | %-10s  | %-10s  | %-20s | %20s \n" ,"quando","quem","balcao","o_que","canal_criado/usado");
+    fprintf(log_stream,"%-20s | %-10s  | %-10s  | %-20s | %20s \n" ,"quando","quem","balcao","o_que","canal_criado/usado\n");
   }
   else 
     log_stream = fopen(buffer,"a");
@@ -102,7 +103,6 @@ void print_loja(Loja* loja){
 void gera_stats(char* shm){
 
   int i,clis=0;
-  float t_medio=0;
   Loja* l_ptr = (Loja*) shm;
   char buffer[BUFFER_SIZE];
 
@@ -110,20 +110,20 @@ void gera_stats(char* shm){
   for(i=0; i < l_ptr->balcoes_registados;i++){
 
     strftime(buffer, BUFFER_SIZE, "%Y-%m-%d %H:%M:%S", localtime(&l_ptr->balcoes[i].inicio_funcionamento));
-    fprintf(stderr,"Balcao %d\n",l_ptr->balcoes[i].id);
+    fprintf(stderr,"------>Balcao %d\n",l_ptr->balcoes[i].id);
     fprintf(stderr,"Tempo abertura:%s\n",buffer);
     fprintf(stderr,"Cli atendidos:%d\n",l_ptr->balcoes[i].num_cli_atendidos);
     fprintf(stderr,"Tempo medio atendimento:%5.2f\n",l_ptr->balcoes[i].tempo_medio_atendimento);
+    fprintf(stderr, "Duracao_funcionamento:%d\n",l_ptr->balcoes[i].duracao_funcionamento);
     clis += l_ptr->balcoes[i].num_cli_atendidos;
-    t_medio += l_ptr->balcoes[i].tempo_medio_atendimento;
   }
 
   strftime(buffer, BUFFER_SIZE, "%Y-%m-%d %H:%M:%S",localtime(&l_ptr->tempo_abertura_loja));
-  fprintf(stderr,"Abertura loja:%s\n",buffer);
+  fprintf(stderr,"------>Loja\nAbertura loja:%s\n",buffer);
   fprintf(stderr,"Total cli atendidos:%d\n",clis);
   if(clis==0)
-    fprintf(stderr,"Tempo medio antedimento:%f\n", t_medio);
+    fprintf(stderr,"Tempo medio antedimento:%d\n", l_ptr->tempo_total);
   else
-    fprintf(stderr,"Tempo medio antedimento:%4.2f\n", (float) t_medio/clis);
+    fprintf(stderr,"Tempo medio antedimento:%4.2f\n", (float) l_ptr->tempo_total/clis);
   printf("//===========================//\n");
 }

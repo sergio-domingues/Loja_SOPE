@@ -1,0 +1,4 @@
+INSTRUÇÕES:
+após extração do ficheiro, estando no directório da pasta extraída, compilar na consola com o comando make e posteriormente executar os comandos: 
+./bin/balcao <shmem_name> <tempo> &
+./bin/ger_cl <shmem_name> <num_clientes> &

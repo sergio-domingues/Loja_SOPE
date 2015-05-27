@@ -41,7 +41,6 @@ int main(int argc,char* argv[]){
 	if(shmfd < 0){
 		shmfd = create_shared_memory(argv[1],SHM_SIZE); 
 		create_shm = 1;
-		fprintf(stderr, "\ncria shmem");
 	}
 
   	//mapeamento para virtual memory
@@ -60,11 +59,17 @@ int main(int argc,char* argv[]){
 
 		loja.tempo_abertura_loja = tempo_actual_maquina;
 		loja.balcoes_registados = 0;
+		loja.tempo_total = 0;
 
 	    if (pthread_mutex_init(&(loja.access_lock), NULL) != 0){ 	 //INIT MUTEX SHM
 	    	printf("\n access_mutex init failed\n");
 	    	exit(EXIT_FAILURE);
 	    }
+
+	    /*if (pthread_mutex_init(&(loja.access_log), NULL) != 0){ 	 //INIT MUTEX log
+	    	printf("\n access_mutex init failed\n");
+	    	exit(EXIT_FAILURE);
+	    }*/
 	    
 	    l_ptr = (Loja*) shm; 	//inicio shm	    
 	    *l_ptr = loja;		 	//grava loja na shmem
@@ -156,18 +161,20 @@ int main(int argc,char* argv[]){
 	  info->shm_name = argv[1];
 	  
 	  //CRIA THREAD
-	  int err = pthread_create(&tid, NULL, thr_func, info);    
-	  
+	  int err = pthread_create(&tid, NULL, thr_func, info);	  
 	  if(err != 0){
 	  	fprintf(stderr, "ERRO NA CRIACAO DA THREAD DE ATENDIMENTO\n");
 	  	exit(EXIT_FAILURE);
-	  }
+	  }	
 	}
 	//FECHO BALCAO=========================================
 
 	pthread_mutex_lock(&(l_ptr->access_lock)); //actualiza duracao do balcao
 	
 	l_ptr->balcoes[b.id-1].duracao_funcionamento = (int)time(NULL) - (int)b.inicio_funcionamento;
+
+	if(l_ptr->balcoes[b.id-1].num_cli_atendidos != 0)	
+		l_ptr->balcoes[b.id-1].tempo_medio_atendimento = l_ptr->balcoes[b.id-1].tempo_medio_atendimento / l_ptr->balcoes[b.id-1].num_cli_atendidos;
 	
 	pthread_mutex_unlock(&(l_ptr->access_lock));
 
@@ -188,8 +195,7 @@ int main(int argc,char* argv[]){
 	pthread_mutex_unlock(&(l_ptr->access_lock));   
 
 	//gerar estatisticas / fechar loja
-	if(fecha==1){
-		//print_loja(l_ptr) ;
+	if(fecha==1){		
 		gera_stats(shm);
 		destroy_shared_memory(argv[1],SHM_SIZE);    		//close and remove shmem region
 
@@ -219,18 +225,19 @@ void* thr_func(void*arg){
 
   sleep(tempo_simula_atendimento); 		  			//realiza atendimento
   
+  log_loja(((Info_atendimento*)arg)->shm_name,"Balcao",((Info_atendimento*)arg)->id_balcao,"fim_atendimento",((Info_atendimento*)arg)->fifo_cliente);
+
   int fdr = open((*(Info_atendimento*)arg).fifo_cliente, O_WRONLY); 	//abre FIFO cliente para escrita  
   write(fdr,msg, sizeof(msg));	  										//escreve no fifo do cliente : fim_atendimento  
   close(fdr);															//fecha fifo cliente (escrita)
   
-  log_loja(((Info_atendimento*)arg)->shm_name,"Balcao",((Info_atendimento*)arg)->id_balcao,"fim_atendimento",((Info_atendimento*)arg)->fifo_cliente);
-
   //actualiza info balcao
   pthread_mutex_lock(&(l_ptr->access_lock)); 		//lock shm
-  
+
   l_ptr->balcoes[id-1].num_cli_atendidos++;  
   l_ptr->balcoes[id-1].num_cli_atendimento--;  
-  l_ptr->balcoes[id-1].tempo_medio_atendimento = (float)(l_ptr->balcoes[id-1].tempo_medio_atendimento + tempo_simula_atendimento) / 2 ; 
+  l_ptr->balcoes[id-1].tempo_medio_atendimento += tempo_simula_atendimento;   //variavel acumula tempo, no fim divide-se pelos clientes
+  l_ptr->tempo_total+=tempo_simula_atendimento;
   
   pthread_mutex_unlock(&(l_ptr->access_lock));    //unlock shm  
 
